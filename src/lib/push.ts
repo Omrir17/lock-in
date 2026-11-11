@@ -1,4 +1,4 @@
-import { sb } from './supabase';
+import { api } from './api';
 
 export type PushState = 'unsupported' | 'needs-install' | 'off' | 'on' | 'denied';
 
@@ -29,19 +29,17 @@ export async function enablePush(): Promise<void> {
   const reg = await navigator.serviceWorker.ready;
   let sub = await reg.pushManager.getSubscription();
   if (!sub) {
-    const { data, error } = await sb.functions.invoke('notify', { body: { action: 'vapid' } });
-    if (error || !data?.publicKey) throw new Error('מפתח ההתראות עוד לא הוגדר בשרת.');
-    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(data.publicKey) });
+    const { publicKey } = await api<{ publicKey: string | null }>('push/key');
+    if (!publicKey) throw new Error('מפתח ההתראות עוד לא הוגדר בשרת.');
+    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) });
   }
-  const j = sub.toJSON() as { endpoint: string; keys: { p256dh: string; auth: string } };
-  const { error } = await sb.from('push_subs').upsert({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth }, { onConflict: 'endpoint' });
-  if (error) throw new Error(error.message);
+  await api('push/subscribe', { body: sub.toJSON() });
 }
 
 export async function disablePush(): Promise<void> {
   const reg = await navigator.serviceWorker.getRegistration();
   const sub = await reg?.pushManager.getSubscription();
   if (!sub) return;
-  await sb.from('push_subs').delete().eq('endpoint', sub.endpoint);
+  await api('push/unsubscribe', { body: { endpoint: sub.endpoint } });
   await sub.unsubscribe();
 }

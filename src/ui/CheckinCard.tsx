@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useStore } from '../lib/store';
-import { sb } from '../lib/supabase';
 import { nextWorkout } from '../lib/stats';
 import { nowMinutes, today } from '../lib/date';
 import type { Checkin } from '../lib/types';
@@ -26,8 +25,7 @@ export function CheckinCard({ day = today(), onStart }: { day?: string; onStart?
     try {
       await s.upsertCheckin(day, patch);
       // keep the coach in the loop without spending a model call
-      await sb.from('messages').insert({ role: 'user', content: note });
-      await s.reload(['messages']);
+      await s.note(note);
       setMode('idle');
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   }
@@ -89,8 +87,7 @@ export function CheckinCard({ day = today(), onStart }: { day?: string; onStart?
         <span>{line}</span>
         <button className="link" onClick={async () => {
           if (c.status === 'done') { setMode('review'); return; }
-          await sb.from('checkins').delete().eq('day', day);
-          await s.reload(['checkins']);
+          await s.deleteCheckin(day);
         }}>
           לשנות
         </button>

@@ -33,7 +33,7 @@ const store: Store = {
   messages: [
     { id: 1, role: 'assistant', content: 'הולך היום לחדר כושר? הבא בתור: Upper A · דחיפה.', kind: 'ask', created_at: new Date().toISOString() },
   ],
-  reload: noop, upsertCheckin: noop, savePlan: noop, saveSets: noop, setMetric: noop, saveProfile: noop, addMemory: noop, deleteMemory: noop, sendChat: noop, sending: false,
+  reload: noop, upsertCheckin: noop, savePlan: noop, saveSets: noop, setMetric: noop, saveProfile: noop, addMemory: noop, deleteMemory: noop, sendChat: noop, sending: false, deleteCheckin: noop, note: noop,
 };
 
 createRoot(document.getElementById('root')!).render(<Ctx.Provider value={store}><Shell /></Ctx.Provider>);

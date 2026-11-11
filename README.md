@@ -12,29 +12,29 @@ Hebrew, RTL, installable on iPhone from Safari (Share → Add to Home Screen).
   sleep and energy, and why sessions were skipped.
 
 ## Stack
-- Vite + React + TypeScript, hosted on GitHub Pages.
-- Supabase: Postgres with RLS, Auth (email + password), Edge Functions (`coach`, `notify`), pg_cron every 10 min.
-- Web Push (VAPID). iOS needs 16.4+ and the app opened from the home-screen icon.
+- Vite + React + TypeScript, served as static assets by a Cloudflare Worker.
+- The same Worker is the API (`/api/*`): D1 (SQLite) database, email + password sign-in, the coach, and a cron
+  trigger every 10 minutes that sends the daily questions.
+- Web Push (VAPID) implemented with WebCrypto in `worker/src/webpush.ts`. iOS needs 16.4+ and the app opened from
+  the home-screen icon.
 
 ## Deploy
-Everything deploys from `.github/workflows/deploy.yml` on every push to `main`.
-Repository secrets:
+`.github/workflows/deploy.yml` runs on every push to `main`. Repository secrets:
 
 | Secret | What |
 | --- | --- |
-| `SUPABASE_ACCESS_TOKEN` | Supabase → Account → Access Tokens |
-| `SUPABASE_PROJECT_REF` | The project id from its URL |
+| `CLOUDFLARE_API_TOKEN` | Token from the "Edit Cloudflare Workers" template, plus Account → D1 → Edit |
+| `CLOUDFLARE_ACCOUNT_ID` | The account the app lives in. Use a separate account from anything else you run |
 | `OPENAI_API_KEY` | For the coach |
 
-The workflow applies `supabase/migrations` through the Management API, pushes auth settings from
-`supabase/config.toml`, creates VAPID keys once, sets the secrets, deploys the functions, and builds the site.
-Optional function secrets: `OPENAI_MODEL`, `OPENAI_FALLBACK_MODEL`, `OPENAI_BASE_URL`.
+The workflow creates the D1 database on first run, applies `worker/migrations`, deploys the Worker, creates VAPID
+keys once, and sets the secrets. Optional Worker secrets: `OPENAI_MODEL`, `OPENAI_FALLBACK_MODEL`, `OPENAI_BASE_URL`.
 
-The first account created is the owner; only the owner can use the coach. After signing up, turn off
-"Allow new users to sign up" in Supabase → Authentication.
+The first account that signs up is the only one; sign-up closes after that.
 
 ## Local
 ```
 npm install
-npm run dev        # open /demo.html for a preview with fake data
+npm run build && npx wrangler d1 migrations apply lock-in --local && npx wrangler dev
+npm run dev        # UI only: open /demo.html for a preview with fake data
 ```

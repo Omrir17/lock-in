@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '../lib/store';
-import { sb } from '../lib/supabase';
+import { api } from '../lib/api';
 import { shortDate } from '../lib/date';
 import { currentPhase } from '../lib/stats';
 import type { Exercise, ExKind, Plan, Workout } from '../lib/types';
@@ -24,9 +24,9 @@ export function PlanView({ go }: { go: (t: Tab) => void }) {
   }
 
   async function undo() {
-    const { data } = await sb.from('plan_versions').select('id,data,created_at').order('id', { ascending: false }).limit(2);
-    if (!data || data.length < 2) { setMsg('אין גרסה קודמת.'); return; }
-    await s.savePlan(data[1].data as Plan);
+    const data = await api<{ data: Plan; created_at: string }[]>('plan/versions');
+    if (data.length < 2) { setMsg('אין גרסה קודמת.'); return; }
+    await s.savePlan(data[1].data, 'חזרה לגרסה קודמת');
     setMsg(`חזרנו לגרסה מ־${shortDate(data[1].created_at.slice(0, 10))}.`);
   }
 

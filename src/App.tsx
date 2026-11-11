@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { Session } from '@supabase/supabase-js';
-import { sb } from './lib/supabase';
+import { getToken } from './lib/api';
 import { StoreProvider } from './lib/store';
 import { Login } from './ui/Login';
 import { Home } from './ui/Home';
@@ -24,14 +23,13 @@ function tabFromUrl(url: string): Tab | null {
 }
 
 export default function App() {
-  const [session, setSession] = useState<Session | null | undefined>(undefined);
+  const [token, setTok] = useState(getToken);
   useEffect(() => {
-    sb.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data } = sb.auth.onAuthStateChange((_e, s) => setSession(s));
-    return () => data.subscription.unsubscribe();
+    const on = () => setTok(getToken());
+    window.addEventListener('lockin-auth', on);
+    return () => window.removeEventListener('lockin-auth', on);
   }, []);
-  if (session === undefined) return <div className="splash"><div className="logo">Lock-in</div></div>;
-  if (!session) return <Login />;
+  if (!token) return <Login />;
   return <StoreProvider><Shell /></StoreProvider>;
 }
 

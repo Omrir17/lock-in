@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../lib/store';
-import { sb } from '../lib/supabase';
+import { api, setToken } from '../lib/api';
 import { disablePush, enablePush, pushState, PushState } from '../lib/push';
 import { Icon } from './icons';
 
@@ -37,9 +37,8 @@ export function Settings({ close }: { close: () => void }) {
                 ? <button className="btn primary" onClick={() => run(async () => { await enablePush(); setPush('on'); }, 'ההתראות פועלות.')}>להפעיל התראות</button>
                 : <>
                     <button className="btn" onClick={() => run(async () => {
-                      const { data, error } = await sb.functions.invoke('notify', { body: { action: 'test' } });
-                      if (error) throw error;
-                      if (!data?.sent) throw new Error('לא נמצא מכשיר רשום. כבה והפעל מחדש.');
+                      const data = await api<{ sent: number }>('push/test', { body: {} });
+                      if (!data.sent) throw new Error('לא נמצא מכשיר רשום. כבה והפעל מחדש.');
                     }, 'נשלחה התראת בדיקה.')}>התראת בדיקה</button>
                     <button className="btn ghost" onClick={() => run(async () => { await disablePush(); setPush('off'); })}>לכבות במכשיר הזה</button>
                   </>}
@@ -81,7 +80,7 @@ export function Settings({ close }: { close: () => void }) {
 
         {err && <p className="err">{err}</p>}
         {ok && <p className="ok">{ok}</p>}
-        <button className="link signout" onClick={() => sb.auth.signOut()}>יציאה מהחשבון</button>
+        <button className="link signout" onClick={async () => { await api('auth/logout', { body: {} }).catch(() => {}); setToken(null); }}>יציאה מהחשבון</button>
       </div>
     </div>
   );
