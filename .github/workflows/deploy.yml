@@ -1,0 +1,106 @@
+name: Deploy Lock-in
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    outputs:
+      anon_key: ${{ steps.keys.outputs.anon_key }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check secrets
+        run: |
+          missing=""
+          for n in SUPABASE_ACCESS_TOKEN PROJECT_REF; do [ -z "${!n}" ] && missing="$missing $n"; done
+          if [ -n "$missing" ]; then echo "::error::Missing repository secrets:$missing"; exit 1; fi
+      - name: Install Supabase CLI
+        run: npm i -g supabase@3.1.0
+      - name: Database migrations
+        # Runs SQL through the Management API (HTTPS), so no direct database connection is needed.
+        run: |
+          sed -i "s/__PROJECT_REF__/$PROJECT_REF/g" supabase/migrations/*.sql
+          api() {
+            curl -sS --fail-with-body -X POST "https://api.supabase.com/v1/projects/$PROJECT_REF/database/query" \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" \
+              -d "$(jq -Rs '{query: .}' <<< "$1")"
+          }
+          api "create table if not exists public._migrations (name text primary key, applied_at timestamptz default now()); alter table public._migrations enable row level security;" > /dev/null
+          applied=$(api "select name from public._migrations")
+          for f in supabase/migrations/*.sql; do
+            n=$(basename "$f")
+            if echo "$applied" | jq -e --arg n "$n" 'any(.[]; .name == $n)' > /dev/null; then echo "skip $n"; continue; fi
+            echo "apply $n"
+            api "$(cat "$f")
+          insert into public._migrations (name) values ('$n');" > /dev/null
+          done
+      - name: Auth settings
+        run: supabase config push --remote="$PROJECT_REF" --yes || echo "::warning::config push failed; set Site URL in the Supabase dashboard"
+      - name: Secrets
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if ! supabase secrets list --remote="$PROJECT_REF" --output-format json | grep -q VAPID_PUBLIC_KEY; then
+            keys=$(npx --yes web-push@3.6.7 generate-vapid-keys --json)
+            supabase secrets set --remote="$PROJECT_REF" --yes \
+              VAPID_PUBLIC_KEY="$(echo "$keys" | jq -r .publicKey)" \
+              VAPID_PRIVATE_KEY="$(echo "$keys" | jq -r .privateKey)"
+          fi
+          if [ -n "$OPENAI_API_KEY" ]; then supabase secrets set --remote="$PROJECT_REF" --yes OPENAI_API_KEY="$OPENAI_API_KEY"; else echo "::warning::OPENAI_API_KEY secret is not set; the coach will not answer"; fi
+      - name: Edge functions
+        run: supabase functions deploy --remote="$PROJECT_REF" --use-api --yes
+      - name: Public API key for the app
+        id: keys
+        run: |
+          json=$(supabase projects api-keys --remote="$PROJECT_REF" --output-format json)
+          key=$(echo "$json" | jq -r '[.. | objects | select(((.type? // "") == "publishable") or ((.name? // "") == "anon"))][0] | (.api_key // .key // .value // empty)')
+          if [ -z "$key" ]; then echo "::error::Could not read the project's public API key"; echo "$json" | jq 'map(del(.api_key, .key, .value))' || true; exit 1; fi
+          echo "anon_key=$key" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build app
+        env:
+          VITE_SUPABASE_URL: https://${{ secrets.SUPABASE_PROJECT_REF }}.supabase.co
+          VITE_SUPABASE_KEY: ${{ needs.backend.outputs.anon_key }}
+        run: npm run build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
