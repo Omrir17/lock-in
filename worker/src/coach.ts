@@ -166,9 +166,13 @@ async function context(db: D1Database, uid: number): Promise<string> {
   ].join('\n\n');
 }
 
-async function complete(env: Env, messages: Msg[], model: string, effort: boolean) {
+// Some models reject reasoning_effort together with function tools unless it is 'none';
+// others reject 'none' or the parameter altogether. Try in this order.
+const EFFORTS: (string | null)[] = ['low', 'none', null];
+
+async function complete(env: Env, messages: Msg[], model: string, effort: string | null) {
   const body: Record<string, unknown> = { model, messages, tools: TOOLS, max_completion_tokens: 3000 };
-  if (effort) body.reasoning_effort = 'low';
+  if (effort) body.reasoning_effort = effort;
   const r = await fetch(`${env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
@@ -180,16 +184,18 @@ async function complete(env: Env, messages: Msg[], model: string, effort: boolea
 
 async function chat(env: Env, messages: Msg[]): Promise<Msg> {
   const fallback = env.OPENAI_FALLBACK_MODEL ?? 'gpt-5.6-luna';
-  let model = env.OPENAI_MODEL ?? 'gpt-6-luna', effort = true;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await complete(env, messages, model, effort);
+  let model = env.OPENAI_MODEL ?? 'gpt-6-luna', e = 0;
+  let last = 'the model did not answer';
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const res = await complete(env, messages, model, EFFORTS[e]);
     if (res.ok && res.j.choices?.[0]) return res.j.choices[0].message;
     const msg = res.j.error?.message ?? `HTTP ${res.status}`;
-    if (effort && /reasoning/i.test(msg)) { effort = false; continue; }
-    if (model !== fallback && (res.status === 404 || /model/i.test(msg))) { model = fallback; continue; }
+    last = msg;
+    if (/reasoning/i.test(msg) && e < EFFORTS.length - 1) { e++; continue; }
+    if (model !== fallback && (res.status === 400 || res.status === 404 || /model/i.test(msg))) { model = fallback; e = 0; continue; }
     throw new Error(msg);
   }
-  throw new Error('the model did not answer');
+  throw new Error(last);
 }
 
 export async function coach(env: Env, uid: number, message: unknown) {
